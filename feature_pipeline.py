@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 import hopsworks
 
-#Login
+# Login
 load_dotenv()
 project = hopsworks.login(api_key_value=os.getenv("HOPSWORKS_API_KEY"))
 
@@ -19,12 +19,12 @@ LOCATIONS = {
 }
 
 def push_to_featurestore(df: pd.DataFrame):
-    fs = project.get_feature_store()  # nutzt das bereits erstellte project-Objekt
+    fs = project.get_feature_store()
 
     fg = fs.get_or_create_feature_group(
         name="weather_features_multiregion",
         version=1,
-        description="Stundliche Wetterdaten fuer mehrere Orte",
+        description="Stündliche Wetterdaten fuer mehrere Orte",
         primary_key=["location", "timestamp"],
         event_time="timestamp"
     )
@@ -64,23 +64,45 @@ def run_all_locations():
             "surface_pressure":      "pressure",
             "precipitation":         "precip"
         }, inplace=True)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["location"]  = loc_name
+        
+        # Timestamp: einfach UTC setzen, API liefert bereits UTC-aequivalent
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_localize(None)
+        df["location"] = loc_name
 
         df = df.sort_values("timestamp").reset_index(drop=True)
-        df["humidity_avg_24h"] = df["humidity"].rolling(window=24, min_periods=1).mean()
-        df["temp_avg_24h"]     = df["temp"].rolling(window=24, min_periods=1).mean()
-        df["pressure_avg_24h"] = df["pressure"].rolling(window=24, min_periods=1).mean()
-        df["rain_t1"]          = df["precip"].shift(-1)
-        df["rain_t2"]          = df["precip"].shift(-2)
-        df["will_rain_in_2h"]  = ((df["rain_t1"] > 0.1) | (df["rain_t2"] > 0.1)).astype(int)
+        
+        # Rolling averages - korrekt pro Location (auch wenn in der Loop nur eine Location pro df)
+        df["humidity_avg_24h"] = (
+            df.groupby("location")["humidity"]
+            .transform(lambda x: x.rolling(window=24, min_periods=1).mean())
+        )
+        df["temp_avg_24h"] = (
+            df.groupby("location")["temp"]
+            .transform(lambda x: x.rolling(window=24, min_periods=1).mean())
+        )
+        df["pressure_avg_24h"] = (
+            df.groupby("location")["pressure"]
+            .transform(lambda x: x.rolling(window=24, min_periods=1).mean())
+        )
+        
+        # Future precipitation fuer Label (will_rain_in_2h)
+        df["rain_t1"] = df["precip"].shift(-1)
+        df["rain_t2"] = df["precip"].shift(-2)
+        
+        # Label: bleibt NaN wo shift NaN erzeugt hat, wird spaeter mit dropna() entfernt
+        df["will_rain_in_2h"] = (
+			(df["rain_t1"] > 0.1) | (df["rain_t2"] > 0.1)
+		).where(df["rain_t1"].notna() & df["rain_t2"].notna()).astype('Int64')
 
+        # Feature-Auswahl
         features_df = df[[
             "timestamp", "location",
             "humidity_avg_24h", "temp_avg_24h", "pressure_avg_24h",
             "cloud_cover", "humidity", "will_rain_in_2h"
         ]].copy()
         features_df.rename(columns={"humidity": "humidity_current"}, inplace=True)
+        
+        # Entferne Zeilen mit NaN (vor allem Label-NaN aus den letzten 2 Zeilen)
         features_df = features_df.dropna()
 
         all_features.append(features_df)
