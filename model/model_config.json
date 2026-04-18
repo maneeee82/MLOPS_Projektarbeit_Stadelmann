@@ -1,0 +1,52 @@
+{
+  "model_type": "RandomForestClassifier",
+  "threshold": 0.3,
+  "n_estimators": 100,
+  "class_weight": "balanced",
+  "accuracy": 0.8698914800277072,
+  "notes": "Optimiert f\u00fcr hohen Recall (Regenwarnungen wichtiger)",
+  "threshold_analysis": [
+    {
+      "threshold": 0.3,
+      "precision": 0.6968603392277156,
+      "recall": 0.8706041478809738,
+      "f1": 0.774103026658649
+    },
+    {
+      "threshold": 0.35,
+      "precision": 0.7358191193970647,
+      "recall": 0.8363390441839496,
+      "f1": 0.7828655834564254
+    },
+    {
+      "threshold": 0.4,
+      "precision": 0.772906619903551,
+      "recall": 0.7948602344454464,
+      "f1": 0.7837297177150477
+    },
+    {
+      "threshold": 0.45,
+      "precision": 0.7965284474445516,
+      "recall": 0.7448151487826871,
+      "f1": 0.7698042870456664
+    },
+    {
+      "threshold": 0.5,
+      "precision": 0.8215042372881356,
+      "recall": 0.6992786293958522,
+      "f1": 0.7554797856794935
+    },
+    {
+      "threshold": 0.55,
+      "precision": 0.8486997635933806,
+      "recall": 0.6474301172227231,
+      "f1": 0.7345268542199489
+    },
+    {
+      "threshold": 0.6,
+      "precision": 0.8794037940379403,
+      "recall": 0.5852119026149685,
+      "f1": 0.7027612344342177
+    }
+  ]
+}
