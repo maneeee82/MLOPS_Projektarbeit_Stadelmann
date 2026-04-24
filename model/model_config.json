@@ -1,52 +1,85 @@
 {
-  "model_type": "RandomForestClassifier",
-  "threshold": 0.3,
-  "n_estimators": 100,
-  "class_weight": "balanced",
-  "accuracy": 0.8698914800277072,
-  "notes": "Optimiert f\u00fcr hohen Recall (Regenwarnungen wichtiger)",
-  "threshold_analysis": [
+  "model_type": "XGBClassifier",
+  "label": "strong_wind_warning",
+  "threshold_kmh": 50,
+  "threshold_prob": 0.4083,
+  "n_estimators": 500,
+  "scale_pos_weight": 58.08,
+  "f1": 0.8023,
+  "roc_auc": 0.9927,
+  "feature_columns": [
+    "temp",
+    "humidity",
+    "dew_point",
+    "cloud_cover",
+    "cloud_cover_low",
+    "pressure",
+    "precip",
+    "wind_gusts",
+    "humidity_avg_24h",
+    "temp_avg_24h",
+    "pressure_avg_24h",
+    "precip_avg_24h",
+    "wind_gusts_avg_24h",
+    "weather_code_0",
+    "weather_code_1",
+    "weather_code_2",
+    "weather_code_3",
+    "weather_code_51",
+    "weather_code_53",
+    "weather_code_55",
+    "weather_code_61",
+    "weather_code_63",
+    "weather_code_65",
+    "weather_code_71",
+    "weather_code_73",
+    "weather_code_75",
+    "location_basel",
+    "location_bern",
+    "location_geneva",
+    "location_lugano",
+    "location_zurich"
+  ],
+  "top_features": [
     {
-      "threshold": 0.3,
-      "precision": 0.6968603392277156,
-      "recall": 0.8706041478809738,
-      "f1": 0.774103026658649
+      "feature": "wind_gusts",
+      "importance": 0.373775839805603
     },
     {
-      "threshold": 0.35,
-      "precision": 0.7358191193970647,
-      "recall": 0.8363390441839496,
-      "f1": 0.7828655834564254
+      "feature": "wind_gusts_avg_24h",
+      "importance": 0.08794984966516495
     },
     {
-      "threshold": 0.4,
-      "precision": 0.772906619903551,
-      "recall": 0.7948602344454464,
-      "f1": 0.7837297177150477
+      "feature": "location_geneva",
+      "importance": 0.04336210712790489
     },
     {
-      "threshold": 0.45,
-      "precision": 0.7965284474445516,
-      "recall": 0.7448151487826871,
-      "f1": 0.7698042870456664
+      "feature": "pressure",
+      "importance": 0.0389583557844162
     },
     {
-      "threshold": 0.5,
-      "precision": 0.8215042372881356,
-      "recall": 0.6992786293958522,
-      "f1": 0.7554797856794935
+      "feature": "weather_code_2",
+      "importance": 0.03502584993839264
     },
     {
-      "threshold": 0.55,
-      "precision": 0.8486997635933806,
-      "recall": 0.6474301172227231,
-      "f1": 0.7345268542199489
+      "feature": "location_basel",
+      "importance": 0.02727324329316616
     },
     {
-      "threshold": 0.6,
-      "precision": 0.8794037940379403,
-      "recall": 0.5852119026149685,
-      "f1": 0.7027612344342177
+      "feature": "humidity",
+      "importance": 0.025162823498249054
+    },
+    {
+      "feature": "pressure_avg_24h",
+      "importance": 0.023740103468298912
+    },
+    {
+      "feature": "weather_code_3",
+      "importance": 0.02357659488916397
+    },
+    {
+      "feature": "weather_code_53",
+      "importance": 0.02317340485751629
     }
   ]
 }

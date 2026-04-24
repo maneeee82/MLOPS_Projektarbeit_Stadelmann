@@ -6,6 +6,7 @@ import hopsworks
 import joblib
 import json
 import pandas as pd
+import numpy as np
 from datetime import datetime
 
 # ────────────────────────────────────────────
@@ -16,43 +17,48 @@ fs = project.get_feature_store()
 mr = project.get_model_registry()
 
 # ────────────────────────────────────────────
-# 2. Feature Group direkt laden (kein Feature View)
+# 2. Feature Group laden
 # ────────────────────────────────────────────
 fg = fs.get_feature_group(name="weather_features_multiregion", version=1)
 print("✅ Feature Group geladen")
 
 # ────────────────────────────────────────────
-# 3. Modell aus Model Registry laden
+# 3. Bestes Modell aus Model Registry laden
 # ────────────────────────────────────────────
-hw_model = mr.get_model(
-    name="rain_classifier",
-    version=2
+hw_model = mr.get_best_model(
+    name="wind_speed_classifier",
+    metric="f1",
+    direction="max"
 )
 
 model_dir = hw_model.download()
-print("✅ Modell heruntergeladen")
+print(f"✅ Modell heruntergeladen (Version {hw_model.version})")
 
-model = joblib.load(f"{model_dir}/rain_classifier.pkl")
+model = joblib.load(f"{model_dir}/wind_classifier.pkl")
 
 with open(f"{model_dir}/model_config.json", "r") as f:
     config = json.load(f)
 
-threshold = config["threshold"]
+threshold = config["threshold_prob"]
+feature_columns = config["feature_columns"]  # alle Spalten inkl. Dummies aus Training
 print(f"✅ Threshold geladen: {threshold}")
+print(f"✅ Anzahl Feature-Spalten: {len(feature_columns)}")
 print()
 
 # ────────────────────────────────────────────
-# 4. Feature-Spalten definieren
+# 4. Konfiguration
 # ────────────────────────────────────────────
-FEATURE_COLUMNS = [
-    "temp", "humidity", "dew_point", "cloud_cover",
-    "cloud_cover_low", "pressure", "wind_speed",
-    "humidity_avg_24h", "temp_avg_24h", "pressure_avg_24h"
-]
-
-TARGET_LOCATION = "zurich"   # anpassen falls nötig
+TARGET_LOCATION = "zurich"
 TIMESTAMP_COL   = "timestamp"
 latest_ts       = "N/A"
+
+RAW_FEATURE_COLUMNS = [
+    "temp", "humidity", "dew_point", "cloud_cover",
+    "cloud_cover_low", "pressure", "precip",
+    "wind_gusts", "weather_code",
+    "humidity_avg_24h", "temp_avg_24h", "pressure_avg_24h",
+    "precip_avg_24h", "wind_gusts_avg_24h"
+]
 
 # ────────────────────────────────────────────
 # 5. Neueste Zeile aus Feature Group holen
@@ -63,7 +69,6 @@ try:
     if all_df is None or len(all_df) == 0:
         raise ValueError("Feature Group ist leer")
 
-    # Nur gewünschte Location
     loc_df = all_df[all_df["location"] == TARGET_LOCATION].copy()
 
     if len(loc_df) == 0:
@@ -85,43 +90,50 @@ except Exception as e:
     raise RuntimeError(f"Feature-Laden fehlgeschlagen: {e}")
 
 # ────────────────────────────────────────────
-# 6. Feature-Spalten extrahieren & validieren
+# 6. Validieren & Encoding (identisch zu Training)
 # ────────────────────────────────────────────
-missing = [c for c in FEATURE_COLUMNS if c not in features_df.columns]
+missing = [c for c in RAW_FEATURE_COLUMNS if c not in features_df.columns]
 if missing:
     raise ValueError(f"Fehlende Feature-Spalten im DataFrame: {missing}")
 
-X_inference = features_df[FEATURE_COLUMNS]
+X_raw = features_df[RAW_FEATURE_COLUMNS + ["location"]].copy()
+
+# Encoding wie im Training
+X_raw["weather_code"] = X_raw["weather_code"].astype(str)
+X_encoded = pd.get_dummies(X_raw, columns=["weather_code", "location"], dtype=int)
+
+# Spalten auf Training-Stand bringen: fehlende mit 0, ueberschuessige droppen
+X_encoded = X_encoded.reindex(columns=feature_columns, fill_value=0)
 
 print()
-print("Inferenz-Features:")
-print(X_inference.to_string(index=False))
+print("Inferenz-Features (erste 10 Spalten):")
+print(X_encoded.iloc[:, :10].to_string(index=False))
 print()
 
 # ────────────────────────────────────────────
 # 7. Prediction
 # ────────────────────────────────────────────
-y_pred_proba = model.predict_proba(X_inference)[:, 1][0]
+y_pred_proba = model.predict_proba(X_encoded)[:, 1][0]
 y_pred = int(y_pred_proba >= threshold)
 
 # ────────────────────────────────────────────
 # 8. Ergebnis ausgeben
 # ────────────────────────────────────────────
 print("=" * 70)
-print("REGEN-VORHERSAGE (2h Horizont)")
+print("STARKWIND-VORHERSAGE (3h Horizont, >= 50 km/h)")
 print("=" * 70)
-print(f"Location                 : {TARGET_LOCATION}")
-print(f"Regen-Wahrscheinlichkeit : {y_pred_proba * 100:.1f}%")
-print(f"Decision Threshold       : {threshold}")
+print(f"Location                    : {TARGET_LOCATION}")
+print(f"Starkwind-Wahrscheinlichkeit: {y_pred_proba * 100:.1f}%")
+print(f"Decision Threshold          : {threshold}")
 print()
 
 if y_pred == 1:
-    print("VORHERSAGE: REGEN WAHRSCHEINLICH → Schirm einpacken!")
+    print("VORHERSAGE: STARKER WIND WAHRSCHEINLICH → Vorsicht!")
 else:
-    print("VORHERSAGE: KEIN REGEN → Trocken bleiben")
+    print("VORHERSAGE: KEIN STARKER WIND → Alles ruhig")
 
 print()
 print(f"Feature Timestamp : {latest_ts}")
 print(f"Inference Time    : {datetime.now().isoformat()}")
-print(f"Model Version     : 2")
+print(f"Model Version     : {hw_model.version}")
 print("=" * 70)

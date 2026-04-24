@@ -9,6 +9,7 @@ import hopsworks
 load_dotenv()
 project = hopsworks.login(api_key_value=os.getenv("HOPSWORKS_API_KEY"))
 
+THRESHOLD_KMH = 50  # Beaufort 7 – Starker Wind
 
 LOCATIONS = {
     "zurich":  {"lat": 47.38, "lon": 8.54},
@@ -31,7 +32,7 @@ def push_to_featurestore(df: pd.DataFrame):
     )
 
     fg.insert(df, write_options={"wait_for_job": True})
-    print(f"Feature Group aktualisiert: {len(df)} Zeilen eingefuegt.")
+    print(f"Feature Group aktualisiert: {len(df)} Zeilen eingefügt.")
 
 
 def run_all_locations():
@@ -57,7 +58,7 @@ def run_all_locations():
                 "cloud_cover_low",
                 "surface_pressure",
                 "precipitation",
-                "wind_speed_10m",
+                "wind_gusts_10m", 
                 "weather_code"
             ]),
             "timezone": "Europe/Zurich"
@@ -76,36 +77,41 @@ def run_all_locations():
             "cloud_cover":          "cloud_cover",
             "cloud_cover_low":      "cloud_cover_low",
             "surface_pressure":     "pressure",
-            "precipitation":        "precip", #Niederschlag
-            "wind_speed_10m":       "wind_speed",
+            "precipitation":        "precip",
+            "wind_gusts_10m":       "wind_gusts",  
             "weather_code":         "weather_code"
         }, inplace=True)
 
-        # Timestamp korrekt parsen (API liefert lokale Zeit Europe/Zurich)
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         df["location"] = loc_name
-
         df = df.sort_values("timestamp").reset_index(drop=True)
 
-        # Rolling averages (groupby hier technisch redundant, aber konsistent fuer spaeteres concat)
+        # Rolling averages
         for col, new_col in [
-            ("humidity", "humidity_avg_24h"),
-            ("temp",     "temp_avg_24h"),
-            ("pressure", "pressure_avg_24h"),
-            ("precip",   "precip_avg_24h"),
+            ("humidity",    "humidity_avg_24h"),
+            ("temp",        "temp_avg_24h"),
+            ("pressure",    "pressure_avg_24h"),
+            ("precip",      "precip_avg_24h"),
+            ("wind_gusts",  "wind_gusts_avg_24h"),   
         ]:
-            df[new_col] = df[col].rolling(window=24, min_periods=1).mean()
+            df[new_col] = df[col].rolling(window=24, min_periods=24).mean()
 
-        # Label: Regen in den nächsten 2 Stunden (Shift um 1 und 2 Zeilen)
-        df["rain_t1"] = df["precip"].shift(-1)
-        df["rain_t2"] = df["precip"].shift(-2)
+        df = df.dropna(subset=["wind_gusts_avg_24h"])   
 
-        df["will_rain_in_2h"] = (
-            (df["rain_t1"] >= 0.1) | (df["rain_t2"] >= 0.1) #wenn Regen in 1 oder 2h dann 1=Regen
-        ).where(df["rain_t1"].notna() & df["rain_t2"].notna()).astype("Int64")
+        # --- LABEL: Klassifikation ---
+        # Max-Böen in den nächsten 3h berechnen
+        df["wind_t1"] = df["wind_gusts"].shift(-1)  
+        df["wind_t2"] = df["wind_gusts"].shift(-2)  
+        df["wind_t3"] = df["wind_gusts"].shift(-3)   
 
-        # Hilfsspalten entfernen
-        df.drop(columns=["rain_t1", "rain_t2"], inplace=True)
+        wind_max_next_3h = df[["wind_t1", "wind_t2", "wind_t3"]].max(axis=1)
+
+        # Binaeres Label: 1 = Starker Wind (>= 50 km/h), 0 = kein starker Wind
+        df["strong_wind_warning"] = (wind_max_next_3h >= THRESHOLD_KMH).astype(int)
+
+        df.drop(columns=["wind_t1", "wind_t2", "wind_t3"], inplace=True)
+
+        df = df.dropna(subset=["strong_wind_warning"])
 
         # Feature-Auswahl
         features_df = df[[
@@ -118,28 +124,29 @@ def run_all_locations():
             "cloud_cover_low",
             "pressure",
             "precip",
-            "wind_speed",
+            "wind_gusts",          
             "weather_code",
             "humidity_avg_24h",
             "temp_avg_24h",
             "pressure_avg_24h",
             "precip_avg_24h",
-            "will_rain_in_2h"
+            "wind_gusts_avg_24h",   
+            "strong_wind_warning",
         ]].copy()
-
-        # Zeilen mit NaN entfernen (v.a. Label-NaN der letzten 2 Zeilen)
-        features_df = features_df.dropna()
 
         all_features.append(features_df)
         print(f"  → {len(features_df)} Zeilen vorbereitet")
 
+        counts = features_df["strong_wind_warning"].value_counts()
+        pct = features_df["strong_wind_warning"].mean() * 100
+        print(f"     Starker Wind (1): {counts.get(1,0)} ({pct:.1f}%)  |  Kein starker Wind (0): {counts.get(0,0)}")
+
     combined_df = pd.concat(all_features, ignore_index=True)
     print(f"\nTotal: {len(combined_df)} Zeilen fuer {len(LOCATIONS)} Orte")
-    
-    # Speichern in Excel zur Kontrolle
+
     combined_df.to_excel("weather_data_check.xlsx", index=False)
     print("Excel-Datei gespeichert: weather_data_check.xlsx")
-    
+
     push_to_featurestore(combined_df)
 
 

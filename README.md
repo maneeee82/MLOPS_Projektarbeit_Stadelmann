@@ -1,14 +1,15 @@
 # MLOPS_Projektarbeit_Stadelmann
 
-# Wetter Regen Vorhersage
+# Wetter Windböen Vorhersage
 
 ## Überblick
 
 Dieses Projekt implementiert eine FTI-Architektur (Feature-Training-Inference)
-zur Vorhersage von Regen in den nächsten 2 Stunden für fünf Schweizer Städte.
+zur Vorhersage von Windböen in den nächsten 3 Stunden für fünf Schweizer Städte.
 Als Feature Store wird Hopsworks verwendet.
 
-**Ziel:** Binäre Klassifikation – `will_rain_in_2h` (1 = Regen, 0 = kein Regen)
+**Ziel:** Klassifikation – `strong_wind_warning` (binär: 1 = Böe >= 50 km/h, 0 = kein starker Wind)
+**Konkret:** Gegeben die aktuellen Wetterbedingungen und der 24h-Historie, wird vorhergesagt ob in den nächsten 3 Stunden (t+1h, t+2h, t+3h) eine Windböe >= 50 km/h auftritt.
 
 ---
 
@@ -20,8 +21,9 @@ Als Feature Store wird Hopsworks verwendet.
 - **Keine Authentifizierung erforderlich**
 
 ---
-
-## Features
+##=========================================================================================
+## Features Pipeline
+##=========================================================================================
 
 ### Aggregierte Features: Batch / NRT (Near Real-Time)
 Berechnet als Rolling Mean über ein 24h-Fenster:
@@ -32,6 +34,7 @@ Berechnet als Rolling Mean über ein 24h-Fenster:
 | `temp_avg_24h` | Durchschnittliche Temperatur der letzten 24h |
 | `pressure_avg_24h` | Durchschnittlicher Luftdruck der letzten 24h |
 | `precip_avg_24h` | Durchschnittlicher Niederschlag der letzten 24h |
+| `wind_gusts_avg_24h` | Durchschnittliche Windböen der letzten 24h |
 
 ### Aktuelle Features: RT (Real-Time)
 Werte der aktuellen Stunde, erst zur Inferenzzeit bekannt:
@@ -44,7 +47,7 @@ Werte der aktuellen Stunde, erst zur Inferenzzeit bekannt:
 | `humidity` | Aktuelle relative Luftfeuchtigkeit in % |
 | `dew_point` | Taupunkt in °C |
 | `pressure` | Aktueller Luftdruck in hPa |
-| `wind_speed` | Windgeschwindigkeit in km/h |
+| `wind_gusts` | Maximale Windböe der vergangenen Stunde in km/h |
 | `weather_code` | WMO Weather Code |
 | `precip` | Aktueller Niederschlag in mm |
 
@@ -52,34 +55,33 @@ Werte der aktuellen Stunde, erst zur Inferenzzeit bekannt:
 
 | Feature | Beschreibung |
 |---|---|
-| `will_rain_in_2h` | 1 = Niederschlag ≥ 0.1mm in t+1h oder t+2h, sonst 0 |
+| `strong_wind_warning` | 1 = maximale Windböe >= 50 km/h in t+1h, t+2h oder t+3h; 0 = kein starker Wind (Klassifikations-Target) |
 
 ---
 
 ## Architektur
 
-```
 [Open-Meteo API]
-      │
-      ▼
-[Feature Pipeline]        ← berechnet Rolling-Features, setzt Label, schreibt in Hopsworks
-      │
-      ▼
-[Hopsworks Feature Store] ← zentrale Datenhaltung (Feature Group + Feature View)
-      │
-      ▼
-[Training Pipeline]       ← lädt Daten, trainiert Modell, speichert in Model Registry
-      │
-      ▼
-[Hopsworks Model Registry]← versioniertes Modell mit Metriken
-      │
-      ▼
-[Inference Pipeline]      ← lädt Modell, holt aktuelle Features, gibt Vorhersage aus
-```
+|
+v
+[Feature Pipeline] <- berechnet Rolling-Features (24h), setzt Label (shift -1/-2/-3), schreibt in Hopsworks
+|
+v
+[Hopsworks Feature Store] <- zentrale Datenhaltung (Feature Group + Feature View)
+|
+v
+[Training Pipeline] <- lädt Daten, trainiert Modell, speichert in Model Registry
+|
+v
+[Hopsworks Model Registry]<- versioniertes Modell mit Metriken (Accuracy, F1, Precision, Recall)
+|
+v
+[Inference Pipeline] <- lädt Modell, holt aktuelle Features, gibt Windwarnung aus (0 oder 1)
 
 ---
-
+##=========================================================================================
 ## Training Pipeline
+##=========================================================================================
 
 **Datei:** `training_pipeline.py`
 
@@ -89,48 +91,57 @@ Werte der aktuellen Stunde, erst zur Inferenzzeit bekannt:
 2. **Feature Group laden** – gespeicherte Wetterdaten aus dem Feature Store
 3. **Feature View erstellen oder laden** – definiert welche Features ins Modell fliessen
 4. **Train/Test-Split** – 80% Training, 20% Test (zeitlich gemischt)
-5. **Modell trainieren** – Random Forest Classifier
-6. **Evaluation** – Classification Report auf dem Test-Set
-7. **Speichern** – Modell lokal und in der Hopsworks Model Registry
+5. **Encoding** – `weather_code` und `location` werden One-Hot-enkodiert, Spalten zwischen Train/Test angeglichen
+6. **Modell trainieren** – Random Forest Regressor
+7. **Evaluation** – MAE, RMSE, R² auf dem Test-Set
+8. **Speichern** – Modell lokal und in der Hopsworks Model Registry (Versionierung automatisch)
 
 ### Feature-Auswahl
 
 Folgende Features fliessen ins Modell:
 
-| Feature | Typ | Begruendung |
+| Feature | Typ | Begründung |
 |---|---|---|
-| `temp` | RT | Temperatur beeinflusst Kondensation |
-| `humidity` | RT | Hohe Luftfeuchtigkeit = Vorbote von Regen |
-| `dew_point` | RT | Kleiner Abstand Taupunkt/Temperatur = Luft nahe Sättigung |
-| `cloud_cover` | RT | Bewölkung direkt mit Niederschlag korreliert |
-| `cloud_cover_low` | RT | Tiefe Wolken sind besonders regenrelevant |
-| `pressure` | RT | Fallender Luftdruck = Schlechtwetterfront |
-| `wind_speed` | RT | Frontdurchgang oft mit Wind verbunden |
+| `temp` | RT | Temperatur beeinflusst atmosphärische Instabilität |
+| `humidity` | RT | Hohe Luftfeuchtigkeit bremst Wind durch Grenzschichteffekte |
+| `dew_point` | RT | Indikator für Feuchte- und Stabilitätszustand der Luft |
+| `cloud_cover` | RT | Bewölkung korreliert mit Frontdurchgängen |
+| `cloud_cover_low` | RT | Tiefe Wolken deuten auf bodennahe Instabilität hin |
+| `pressure` | RT | Druckgradient ist direkte Ursache von Wind |
+| `precip` | RT | Niederschlag tritt oft gemeinsam mit starkem Wind auf |
+| `wind_speed` | RT | Aktueller Wind als Basis für die Vorhersage |
+| `weather_code` | RT | WMO-Code als kategorisches Signal für Wetterregime |
+| `location` | KAT | Geografische Unterschiede im Windverhalten |
 | `humidity_avg_24h` | NRT | Feuchtigkeitstrend der letzten 24h |
 | `temp_avg_24h` | NRT | Temperaturtrend der letzten 24h |
 | `pressure_avg_24h` | NRT | Drucktrend erkennbar (steigend/fallend) |
+| `precip_avg_24h` | NRT | Niederschlagstrend als Proxy für Frontaktivität |
+| `wind_speed_avg_24h` | NRT | Windtrend der letzten 24h |
 
-**Bewusst ausgeschlossen:**
-
-| Feature | Grund |
-|---|---|
-| `precip` | Aktueller Niederschlag ist quasi das Label selbst → Data Leakage |
-| `precip_avg_24h` | Gleiche Problematik, zu stark mit Label korreliert |
-| `weather_code` | WMO-Code kodiert oft direkt ob es regnet → Data Leakage |
+**Label:** `wind_speed_next_3h_avg` – durchschnittliche Windgeschwindigkeit der nächsten 3 Stunden
 
 ### Modell
 
-- **Algorithmus:** `RandomForestClassifier` (scikit-learn)
-- **`class_weight="balanced"`:** Regen ist seltener als kein Regen. Ohne diese Einstellung lernt das Modell einfach "immer kein Regen" und hat trotzdem hohe Accuracy – was wertlos ist.
-- **`n_estimators=100`:** 100 Entscheidungsbäume, Mehrheitsentscheid
+- **Algorithmus:** `RandomForestRegressor` (scikit-learn)
+- **`n_estimators=100`:** 100 Entscheidungsbäume, Durchschnittswert als Ausgabe
+- **`n_jobs=-1`:** Alle verfügbaren CPU-Kerne werden genutzt
 - **`random_state=42`:** Reproduzierbarkeit
 
 ### Evaluation
 
 Ausgabe nach dem Training:
-- **Classification Report** (Precision, Recall, F1 pro Klasse)
-- **Accuracy** wird als Metrik in der Model Registry gespeichert
+- **MAE** (Mean Absolute Error) – mittlerer absoluter Fehler in km/h
+- **RMSE** (Root Mean Squared Error) – bestraft grosse Ausreisser stärker
+- **R²** – Anteil der erklärten Varianz (1.0 = perfekt)
+- **Top-10 Feature Importances** – welche Features den grössten Einfluss haben
 
-> Hinweis: Bei unbalancierten Klassen ist **Recall für Klasse 1** (Regen) die
-> wichtigste Metrik. Ein Modell das Regen oft verpasst ist schlechter als eines
-> das gelegentlich falschen Alarm schlägt.
+Alle drei Metriken werden in der Hopsworks Model Registry gespeichert.
+
+### Versionierung
+
+Beim Upload in die Model Registry wird die Version automatisch bestimmt:
+- Existiert bereits ein Modell `wind_speed_regressor`, wird die Version des besten Modells (nach **R²**) abgerufen und um 1 erhöht.
+- Existiert noch kein Modell, startet die Versionierung bei **Version 1**.
+
+> Dadurch werden frühere Modellversionen nie überschrieben und sind jederzeit
+> in der Registry nachvollziehbar.

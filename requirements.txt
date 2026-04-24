@@ -1,6 +1,8 @@
 hopsworks>=3.7,<4.0
 pandas
 scikit-learn
+xgboost
 joblib
 requests
 python-dotenv
+numpy
