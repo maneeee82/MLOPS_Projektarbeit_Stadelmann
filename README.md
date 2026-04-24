@@ -1,17 +1,15 @@
-# MLOPS_Projektarbeit_Stadelmann
-
-# Wetter Windböen Vorhersage
+# MLOps Projektarbeit – Wetter Windböen Vorhersage
 
 ## Überblick
 
 Dieses Projekt implementiert eine FTI-Architektur (Feature-Training-Inference)
-zur Vorhersage von Windböen in den nächsten 3 Stunden für fünf Schweizer Städte.
+zur Vorhersage von starken Windböen in den nächsten 3 Stunden für fünf Schweizer Städte.
 Als Feature Store wird Hopsworks verwendet.
 
-**Ziel:** Klassifikation – `strong_wind_warning` (binär: 1 = Böe >= 50 km/h, 0 = kein starker Wind)
-**Konkret:** Gegeben die aktuellen Wetterbedingungen und der 24h-Historie, wird vorhergesagt ob in den nächsten 3 Stunden (t+1h, t+2h, t+3h) eine Windböe >= 50 km/h auftritt.
+**Ziel:** Binäre Klassifikation – `strong_wind_warning`
+- 1 = Windböe >= 50 km/h tritt irgendwann in den nächsten 3 Stunden auf (t+1h, t+2h oder t+3h), 
+- 0 = kein starker Wind
 
----
 
 ## Datenquelle
 
@@ -20,12 +18,46 @@ Als Feature Store wird Hopsworks verwendet.
 - **Zeitraum:** Letzte 365 Tage bis vor 5 Tagen (stündliche Auflösung)
 - **Keine Authentifizierung erforderlich**
 
+## Architektur (FTI)
+
+[Open-Meteo API]
+|
+v
+[Feature Pipeline]
+
+Rohdaten abrufen
+Rolling-Features berechnen (24h)
+Label setzen (shift -1/-2/-3)
+Schreiben in Hopsworks Feature Store
+|
+v
+[Hopsworks Feature Store]
+Feature Group: zentrale Datenhaltung
+Feature View: definiert Feature-Auswahl für Training
+|
+v
+[Training Pipeline]
+Daten laden via Feature View
+Modell trainieren (XGBoost Classifier)
+Evaluation (Accuracy, F1, Precision, Recall, Threshold)
+Speichern in Hopsworks Model Registry (versioniert)
+|
+v
+[Hopsworks Model Registry]
+Versioniertes Modell mit Metriken
+|
+v
+[Inference Pipeline]
+Aktuelle Features laden (neueste Zeile aus Feature View)
+Modell aus Registry laden
+Wahrscheinlichkeit berechnen, mit Threshold vergleichen
+Ausgabe: Windwarnung ja/nein
 ---
 ##=========================================================================================
 ## Features Pipeline
 ##=========================================================================================
 
-### Aggregierte Features: Batch / NRT (Near Real-Time)
+#### Aggregierte Features – Batch / NRT (Near Real-Time)
 Berechnet als Rolling Mean über ein 24h-Fenster:
 
 | Feature | Beschreibung |
@@ -36,7 +68,7 @@ Berechnet als Rolling Mean über ein 24h-Fenster:
 | `precip_avg_24h` | Durchschnittlicher Niederschlag der letzten 24h |
 | `wind_gusts_avg_24h` | Durchschnittliche Windböen der letzten 24h |
 
-### Aktuelle Features: RT (Real-Time)
+### Aktuelle Features – RT (Real-Time)
 Werte der aktuellen Stunde, erst zur Inferenzzeit bekannt:
 
 | Feature | Beschreibung |
@@ -48,37 +80,34 @@ Werte der aktuellen Stunde, erst zur Inferenzzeit bekannt:
 | `dew_point` | Taupunkt in °C |
 | `pressure` | Aktueller Luftdruck in hPa |
 | `wind_gusts` | Maximale Windböe der vergangenen Stunde in km/h |
-| `weather_code` | WMO Weather Code |
+| `weather_code` | WMO Weather Code (kategorisch, One-Hot-enkodiert) |
 | `precip` | Aktueller Niederschlag in mm |
+| `location` | Standort (kategorisch, One-Hot-enkodiert) |
 
 ### Label
 
 | Feature | Beschreibung |
 |---|---|
-| `strong_wind_warning` | 1 = maximale Windböe >= 50 km/h in t+1h, t+2h oder t+3h; 0 = kein starker Wind (Klassifikations-Target) |
+| `strong_wind_warning` | 1 = maximale Windböe >= 50 km/h in t+1h, t+2h oder t+3h; 0 = kein starker Wind |
 
 ---
 
-## Architektur
+## Feature Pipeline
 
-[Open-Meteo API]
-|
-v
-[Feature Pipeline] <- berechnet Rolling-Features (24h), setzt Label (shift -1/-2/-3), schreibt in Hopsworks
-|
-v
-[Hopsworks Feature Store] <- zentrale Datenhaltung (Feature Group + Feature View)
-|
-v
-[Training Pipeline] <- lädt Daten, trainiert Modell, speichert in Model Registry
-|
-v
-[Hopsworks Model Registry]<- versioniertes Modell mit Metriken (Accuracy, F1, Precision, Recall)
-|
-v
-[Inference Pipeline] <- lädt Modell, holt aktuelle Features, gibt Windwarnung aus (0 oder 1)
+**Datei:** `feature_pipeline.py`
+
+### Ablauf
+
+1. Rohdaten stündlich für 5 Standorte via Open-Meteo API abrufen
+2. Rolling-Features über 24h-Fenster berechnen (`.rolling(24).mean()`)
+3. Label `strong_wind_warning` via Shift berechnen:
+   - Wenn `wind_gusts` in t+1h, t+2h **oder** t+3h >= 50 km/h → Label = 1
+4. DataFrame mit Features + Label erstellen
+5. Feature Group in Hopsworks erstellen oder laden (Primary Key: `location` + `timestamp`)
+6. Daten in Feature Group schreiben
 
 ---
+
 ##=========================================================================================
 ## Training Pipeline
 ##=========================================================================================
@@ -87,61 +116,149 @@ v
 
 ### Ablauf
 
-1. **Verbindung** zu Hopsworks via API Key (`.env`)
-2. **Feature Group laden** – gespeicherte Wetterdaten aus dem Feature Store
-3. **Feature View erstellen oder laden** – definiert welche Features ins Modell fliessen
-4. **Train/Test-Split** – 80% Training, 20% Test (zeitlich gemischt)
-5. **Encoding** – `weather_code` und `location` werden One-Hot-enkodiert, Spalten zwischen Train/Test angeglichen
-6. **Modell trainieren** – Random Forest Regressor
-7. **Evaluation** – MAE, RMSE, R² auf dem Test-Set
-8. **Speichern** – Modell lokal und in der Hopsworks Model Registry (Versionierung automatisch)
+1. Verbindung zu Hopsworks via API Key (`.env`)
+2. Feature Group laden
+3. Feature View erstellen oder laden
+4. Train/Test-Split (80/20, zeitlich gemischt)
+5. Encoding: `weather_code` und `location` werden One-Hot-enkodiert,
+   Spalten zwischen Train und Test angeglichen
+6. Modell trainieren: **XGBoost Classifier**
+7. Optimalen Klassifikations-Threshold bestimmen (anhand F1-Score)
+8. Evaluation auf dem Test-Set
+9. Modell + Threshold lokal speichern und in Hopsworks Model Registry hochladen
 
-### Feature-Auswahl
+### Modell: XGBoost Classifier
 
-Folgende Features fliessen ins Modell:
+XGBoost (Extreme Gradient Boosting) ist ein Ensemble-Verfahren, das sequenziell
+viele schwache Entscheidungsbäume trainiert. Jeder neue Baum korrigiert die
+Fehler des vorherigen (Gradient Boosting). Die finale Vorhersage ist:
 
-| Feature | Typ | Begründung |
+$$\hat{y} = \sum_{k=1}^{K} f_k(x)$$
+
+Gegenüber klassischem Gradient Boosting fügt XGBoost explizite Regularisierung
+hinzu, um Overfitting zu reduzieren:
+
+$$\mathcal{L} = \sum_i l(\hat{y}_i, y_i) + \sum_k \left(\gamma T_k + \frac{1}{2}\lambda \|w_k\|^2\right)$$
+
+Dabei ist $$T_k$$ die Anzahl Blätter und $$w_k$$ die Blattgewichte des $$k$$-ten Baums.
+
+**Konfiguration:**
+
+| Parameter | Wert | Bedeutung |
 |---|---|---|
-| `temp` | RT | Temperatur beeinflusst atmosphärische Instabilität |
-| `humidity` | RT | Hohe Luftfeuchtigkeit bremst Wind durch Grenzschichteffekte |
-| `dew_point` | RT | Indikator für Feuchte- und Stabilitätszustand der Luft |
-| `cloud_cover` | RT | Bewölkung korreliert mit Frontdurchgängen |
-| `cloud_cover_low` | RT | Tiefe Wolken deuten auf bodennahe Instabilität hin |
-| `pressure` | RT | Druckgradient ist direkte Ursache von Wind |
-| `precip` | RT | Niederschlag tritt oft gemeinsam mit starkem Wind auf |
-| `wind_speed` | RT | Aktueller Wind als Basis für die Vorhersage |
-| `weather_code` | RT | WMO-Code als kategorisches Signal für Wetterregime |
-| `location` | KAT | Geografische Unterschiede im Windverhalten |
-| `humidity_avg_24h` | NRT | Feuchtigkeitstrend der letzten 24h |
-| `temp_avg_24h` | NRT | Temperaturtrend der letzten 24h |
-| `pressure_avg_24h` | NRT | Drucktrend erkennbar (steigend/fallend) |
-| `precip_avg_24h` | NRT | Niederschlagstrend als Proxy für Frontaktivität |
-| `wind_speed_avg_24h` | NRT | Windtrend der letzten 24h |
+| `n_estimators` | 200 | Anzahl Bäume |
+| `max_depth` | 6 | Maximale Baumtiefe |
+| `learning_rate` | 0.05 | Schrittgrösse pro Baum |
+| `scale_pos_weight` | berechnet | Korrektur für Klassenungleichgewicht |
+| `eval_metric` | `logloss` | Verlustfunktion |
+| `use_label_encoder` | False | Kein internes Encoding |
 
-**Label:** `wind_speed_next_3h_avg` – durchschnittliche Windgeschwindigkeit der nächsten 3 Stunden
+### Threshold-Optimierung
 
-### Modell
-
-- **Algorithmus:** `RandomForestRegressor` (scikit-learn)
-- **`n_estimators=100`:** 100 Entscheidungsbäume, Durchschnittswert als Ausgabe
-- **`n_jobs=-1`:** Alle verfügbaren CPU-Kerne werden genutzt
-- **`random_state=42`:** Reproduzierbarkeit
+Da starke Windböen selten sind (Klassenungleichgewicht), wird der
+Klassifikations-Threshold nicht fix auf 0.5 gesetzt, sondern anhand
+des F1-Scores auf dem Test-Set optimiert. Der optimale Threshold wird
+zusammen mit dem Modell in der Registry gespeichert.
 
 ### Evaluation
 
-Ausgabe nach dem Training:
-- **MAE** (Mean Absolute Error) – mittlerer absoluter Fehler in km/h
-- **RMSE** (Root Mean Squared Error) – bestraft grosse Ausreisser stärker
-- **R²** – Anteil der erklärten Varianz (1.0 = perfekt)
-- **Top-10 Feature Importances** – welche Features den grössten Einfluss haben
-
-Alle drei Metriken werden in der Hopsworks Model Registry gespeichert.
+| Metrik | Beschreibung |
+|---|---|
+| Accuracy | Anteil korrekt klassifizierter Samples |
+| F1-Score | Harmonisches Mittel aus Precision und Recall |
+| Precision | Anteil echter Warnungen unter allen ausgegebenen Warnungen |
+| Recall | Anteil erkannter echter Warnungen |
+| Optimaler Threshold | Schwellwert für die Klassenentscheidung |
 
 ### Versionierung
 
-Beim Upload in die Model Registry wird die Version automatisch bestimmt:
-- Existiert bereits ein Modell `wind_speed_regressor`, wird die Version des besten Modells (nach **R²**) abgerufen und um 1 erhöht.
-- Existiert noch kein Modell, startet die Versionierung bei **Version 1**.
+Beim Upload in die Model Registry wird die Version automatisch inkrementiert:
+- Existiert bereits ein Modell `wind_gust_classifier`, wird die nächste Version vergeben
+- Existiert kein Modell, startet die Versionierung bei Version 1
+- Frühere Versionen werden nie überschrieben und bleiben in der Registry nachvollziehbar
+- Gespeicherte Metriken pro Version: Accuracy, F1, Precision, Recall, Threshold
 
-> Dadurch werden frühere Modellversionen nie überschrieben und sind jederzeit
-> in der Registry nachvollziehbar.
+---
+
+## Inference Pipeline
+
+**Datei:** `inference_pipeline.py`
+
+### Ablauf
+
+1. Verbindung zu Hopsworks via API Key (`.env`)
+2. Feature View laden
+3. Neueste verfügbare Features aus dem Feature Store laden
+4. Modell und Threshold aus der Model Registry laden (neueste Version)
+5. One-Hot-Encoding der kategorischen Features (`weather_code`, `location`),
+   Spalten auf Trainingsschema angleichen
+6. Wahrscheinlichkeit berechnen (`predict_proba`)
+7. Schwellwert-Vergleich: `P >= threshold` → Windwarnung = 1
+8. Ausgabe: Windwarnung für jeden Standort (0 oder 1)
+
+---
+
+## Setup und Ausführung
+
+### Voraussetzungen
+
+- Python < 3.14 (Hopsworks-Anforderung)
+- Hopsworks Account auf [hopsworks.ai](https://hopsworks.ai)
+- `.env`-Datei mit folgendem Inhalt:
+
+## Setup und Ausführung
+
+### Voraussetzungen
+
+- Python < 3.14 (Hopsworks-Anforderung)
+- Hopsworks Account auf [hopsworks.ai](https://hopsworks.ai)
+- `.env`-Datei mit folgendem Inhalt:
+
+HOPSWORKS_API_KEY=<dein_api_key>
+HOPSWORKS_PROJECT=<dein_projektname>
+
+
+### Installation
+
+```bash
+pip install -r requirements.txt
+
+Reihenfolge der Ausführung
+
+# 1. Features berechnen und in Hopsworks schreiben
+python feature_pipeline.py
+
+# 2. Modell trainieren und in Registry speichern
+python training_pipeline.py
+
+# 3. Inferenz durchführen
+python inference_pipeline.py
+
+Abhängigkeiten
+Siehe requirements.txt. Wichtigste Pakete:
+
+Paket	Zweck
+hopsworks	Feature Store und Model Registry
+xgboost	Klassifikationsmodell
+scikit-learn	Preprocessing, Metriken, train_test_split
+pandas	Datenverarbeitung
+requests	API-Abruf
+python-dotenv	Laden der .env-Datei
+==============================================================================
+Limitationen und Reflexion
+Feature Pipeline läuft nicht automatisch: Die Features werden nicht
+automatisch aktualisiert. Für produktiven Einsatz müsste die Pipeline
+per Scheduler (z.B. Cron, GitHub Actions) regelmässig ausgeführt werden.
+Im aktuellen Zustand sind die Daten maximal einige Tage alt.
+
+Klassenungleichgewicht: Starke Windböen (>= 50 km/h) sind selten,
+was zu einem unbalancierten Datensatz führt. Dies wird mit
+scale_pos_weight und Threshold-Optimierung adressiert, aber nicht vollständig gelöst.
+
+Kein Point-in-Time-Split: Train/Test-Split ist zeitlich gemischt (random),
+nicht strikt zeitlich getrennt. In einem produktiven System sollte
+der Test-Split immer die zeitlich späteren Daten umfassen.
+
+Simulierte RT-Features: Da die Open-Meteo Archive API keine echten
+Echtzeit-Daten liefert, werden die RT-Features aus historischen Daten
+simuliert (neueste verfügbare Zeile).
