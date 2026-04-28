@@ -58,7 +58,7 @@ def run_all_locations():
                 "cloud_cover_low",
                 "surface_pressure",
                 "precipitation",
-                "wind_gusts_10m", 
+                "wind_gusts_10m",
                 "weather_code"
             ]),
             "timezone": "Europe/Zurich"
@@ -78,7 +78,7 @@ def run_all_locations():
             "cloud_cover_low":      "cloud_cover_low",
             "surface_pressure":     "pressure",
             "precipitation":        "precip",
-            "wind_gusts_10m":       "wind_gusts",  
+            "wind_gusts_10m":       "wind_gusts",
             "weather_code":         "weather_code"
         }, inplace=True)
 
@@ -88,15 +88,15 @@ def run_all_locations():
 
         # Rolling averages
         for col, new_col in [
-            ("humidity",    "humidity_avg_24h"),
-            ("temp",        "temp_avg_24h"),
-            ("pressure",    "pressure_avg_24h"),
-            ("precip",      "precip_avg_24h"),
-            ("wind_gusts",  "wind_gusts_avg_24h"),   
+            ("humidity",   "humidity_avg_24h"),
+            ("temp",       "temp_avg_24h"),
+            ("pressure",   "pressure_avg_24h"),
+            ("precip",     "precip_avg_24h"),
+            ("wind_gusts", "wind_gusts_avg_24h"),
         ]:
             df[new_col] = df[col].rolling(window=24, min_periods=24).mean()
 
-        df = df.dropna(subset=["wind_gusts_avg_24h"])   
+        df = df.dropna(subset=["wind_gusts_avg_24h"])
 
         # --- LABEL: Klassifikation ---
         # Max-Böen in den nächsten 3h berechnen
@@ -106,12 +106,14 @@ def run_all_locations():
 
         wind_max_next_3h = df[["wind_t1", "wind_t2", "wind_t3"]].max(axis=1)
 
-        # Binaeres Label: 1 = Starker Wind (>= 50 km/h), 0 = kein starker Wind
+        valid_mask = wind_max_next_3h.notna()
+        df = df[valid_mask].copy()
+        wind_max_next_3h = wind_max_next_3h[valid_mask]
+
+        # Binäres Label: 1 = Starker Wind (>= 50 km/h), 0 = kein starker Wind
         df["strong_wind_warning"] = (wind_max_next_3h >= THRESHOLD_KMH).astype(int)
 
         df.drop(columns=["wind_t1", "wind_t2", "wind_t3"], inplace=True)
-
-        df = df.dropna(subset=["strong_wind_warning"])
 
         # Feature-Auswahl
         features_df = df[[
@@ -124,13 +126,13 @@ def run_all_locations():
             "cloud_cover_low",
             "pressure",
             "precip",
-            "wind_gusts",          
+            "wind_gusts",
             "weather_code",
             "humidity_avg_24h",
             "temp_avg_24h",
             "pressure_avg_24h",
             "precip_avg_24h",
-            "wind_gusts_avg_24h",   
+            "wind_gusts_avg_24h",
             "strong_wind_warning",
         ]].copy()
 

@@ -2,11 +2,11 @@
   "model_type": "XGBClassifier",
   "label": "strong_wind_warning",
   "threshold_kmh": 50,
-  "threshold_prob": 0.4083,
+  "threshold_prob": 0.2837,
   "n_estimators": 500,
-  "scale_pos_weight": 58.08,
-  "f1": 0.8023,
-  "roc_auc": 0.9927,
+  "scale_pos_weight": 55.37,
+  "f1": 0.7692,
+  "roc_auc": 0.9958,
   "feature_columns": [
     "temp",
     "humidity",
@@ -43,43 +43,43 @@
   "top_features": [
     {
       "feature": "wind_gusts",
-      "importance": 0.373775839805603
+      "importance": 0.3517032563686371
     },
     {
       "feature": "wind_gusts_avg_24h",
-      "importance": 0.08794984966516495
+      "importance": 0.08240960538387299
+    },
+    {
+      "feature": "weather_code_73",
+      "importance": 0.03727329149842262
     },
     {
       "feature": "location_geneva",
-      "importance": 0.04336210712790489
-    },
-    {
-      "feature": "pressure",
-      "importance": 0.0389583557844162
-    },
-    {
-      "feature": "weather_code_2",
-      "importance": 0.03502584993839264
-    },
-    {
-      "feature": "location_basel",
-      "importance": 0.02727324329316616
-    },
-    {
-      "feature": "humidity",
-      "importance": 0.025162823498249054
-    },
-    {
-      "feature": "pressure_avg_24h",
-      "importance": 0.023740103468298912
-    },
-    {
-      "feature": "weather_code_3",
-      "importance": 0.02357659488916397
+      "importance": 0.034900616854429245
     },
     {
       "feature": "weather_code_53",
-      "importance": 0.02317340485751629
+      "importance": 0.03488760441541672
+    },
+    {
+      "feature": "pressure",
+      "importance": 0.033737603574991226
+    },
+    {
+      "feature": "location_basel",
+      "importance": 0.030908964574337006
+    },
+    {
+      "feature": "location_lugano",
+      "importance": 0.02482237108051777
+    },
+    {
+      "feature": "humidity",
+      "importance": 0.024234753102064133
+    },
+    {
+      "feature": "weather_code_3",
+      "importance": 0.022168029099702835
     }
   ]
 }

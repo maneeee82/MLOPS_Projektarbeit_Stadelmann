@@ -105,6 +105,11 @@ X_encoded = pd.get_dummies(X_raw, columns=["weather_code", "location"], dtype=in
 # Spalten auf Training-Stand bringen: fehlende mit 0, ueberschuessige droppen
 X_encoded = X_encoded.reindex(columns=feature_columns, fill_value=0)
 
+# Validierung
+assert X_encoded.shape[1] == len(feature_columns), \
+    f"Spalten-Mismatch: {X_encoded.shape[1]} != {len(feature_columns)}"
+assert not X_encoded.isna().any().any(), "NaN in Features vorhanden"
+
 print()
 print("Inferenz-Features (erste 10 Spalten):")
 print(X_encoded.iloc[:, :10].to_string(index=False))
@@ -114,6 +119,10 @@ print()
 # 7. Prediction
 # ────────────────────────────────────────────
 y_pred_proba = model.predict_proba(X_encoded)[:, 1][0]
+
+if pd.isna(y_pred_proba) or y_pred_proba < 0 or y_pred_proba > 1:
+    raise ValueError(f"Ungueltige Vorhersage: {y_pred_proba}")
+
 y_pred = int(y_pred_proba >= threshold)
 
 # ────────────────────────────────────────────

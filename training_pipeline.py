@@ -135,6 +135,7 @@ model = xgb.XGBClassifier(
     colsample_bytree=0.8,
     scale_pos_weight=scale_pos_weight,   # kompensiert Klassenungleichgewicht
     eval_metric="aucpr",                 # Area under Precision-Recall – besser bei Imbalance
+    early_stopping_rounds=30,
     random_state=42,
     n_jobs=-1
 )
@@ -219,16 +220,16 @@ joblib.dump(model, model_path)
 print(f"Modell gespeichert: {model_path}")
 
 config = {
-    "model_type":      "XGBClassifier",
-    "label":           "strong_wind_warning",
-    "threshold_kmh":   50,
-    "threshold_prob":  round(float(best_threshold), 4),
-    "n_estimators":    500,
+    "model_type":       "XGBClassifier",
+    "label":            "strong_wind_warning",
+    "threshold_kmh":    50,
+    "threshold_prob":   round(float(best_threshold), 4),
+    "n_estimators":     500,
     "scale_pos_weight": scale_pos_weight,
-    "f1":              round(f1, 4),
-    "roc_auc":         round(auc, 4),
-    "feature_columns": X_train.columns.tolist(),
-    "top_features":    fi_df.to_dict(orient="records")
+    "f1":               round(f1, 4),
+    "roc_auc":          round(auc, 4),
+    "feature_columns":  X_train.columns.tolist(),
+    "top_features":     fi_df.to_dict(orient="records")
 }
 
 config_path = "model/model_config.json"
@@ -242,15 +243,8 @@ print()
 # ────────────────────────────────────────────
 mr = project.get_model_registry()
 
-try:
-    existing = mr.get_best_model("wind_speed_classifier", metric="f1", direction="max")
-    version  = existing.version + 1
-except Exception:
-    version = 1
-
-hw_model = mr.sklearn.create_model(
+hw_model = mr.python.create_model(
     name="wind_speed_classifier",
-    version=version,
     metrics={
         "f1":        round(f1, 4),
         "roc_auc":   round(auc, 4),
@@ -262,4 +256,4 @@ hw_model = mr.sklearn.create_model(
 )
 
 hw_model.save("model")
-print(f"Modell in Model Registry hochgeladen (Version {version}).")
+print(f"Modell in Model Registry hochgeladen (Version {hw_model.version}).")
