@@ -48,9 +48,8 @@ print()
 # ────────────────────────────────────────────
 # 4. Konfiguration
 # ────────────────────────────────────────────
-TARGET_LOCATION = "zurich"
-TIMESTAMP_COL   = "timestamp"
-latest_ts       = "N/A"
+LOCATIONS = ["zurich", "basel", "bern", "geneva", "lugano"]
+TIMESTAMP_COL = "timestamp"
 
 RAW_FEATURE_COLUMNS = [
     "temp", "humidity", "dew_point", "cloud_cover",
@@ -61,88 +60,62 @@ RAW_FEATURE_COLUMNS = [
 ]
 
 # ────────────────────────────────────────────
-# 5. Neueste Zeile aus Feature Group holen
+# 5. Alle Daten einmal laden
 # ────────────────────────────────────────────
-try:
-    all_df = fg.read()
+all_df = fg.read()
 
-    if all_df is None or len(all_df) == 0:
-        raise ValueError("Feature Group ist leer")
+if all_df is None or len(all_df) == 0:
+    raise ValueError("Feature Group ist leer")
 
-    loc_df = all_df[all_df["location"] == TARGET_LOCATION].copy()
-
-    if len(loc_df) == 0:
-        raise ValueError(f"Keine Zeilen fuer Location '{TARGET_LOCATION}' gefunden")
-
-    loc_df[TIMESTAMP_COL] = pd.to_datetime(loc_df[TIMESTAMP_COL])
-
-    features_df = (
-        loc_df
-        .sort_values(TIMESTAMP_COL, ascending=True)
-        .tail(1)
-        .reset_index(drop=True)
-    )
-
-    latest_ts = features_df[TIMESTAMP_COL].iloc[0]
-    print(f"✅ Features geladen – Location: {TARGET_LOCATION} | Timestamp: {latest_ts}")
-
-except Exception as e:
-    raise RuntimeError(f"Feature-Laden fehlgeschlagen: {e}")
+all_df[TIMESTAMP_COL] = pd.to_datetime(all_df[TIMESTAMP_COL])
 
 # ────────────────────────────────────────────
-# 6. Validieren & Encoding (identisch zu Training)
-# ────────────────────────────────────────────
-missing = [c for c in RAW_FEATURE_COLUMNS if c not in features_df.columns]
-if missing:
-    raise ValueError(f"Fehlende Feature-Spalten im DataFrame: {missing}")
-
-X_raw = features_df[RAW_FEATURE_COLUMNS + ["location"]].copy()
-
-# Encoding wie im Training
-X_raw["weather_code"] = X_raw["weather_code"].astype(str)
-X_encoded = pd.get_dummies(X_raw, columns=["weather_code", "location"], dtype=int)
-
-# Spalten auf Training-Stand bringen: fehlende mit 0, ueberschuessige droppen
-X_encoded = X_encoded.reindex(columns=feature_columns, fill_value=0)
-
-# Validierung
-assert X_encoded.shape[1] == len(feature_columns), \
-    f"Spalten-Mismatch: {X_encoded.shape[1]} != {len(feature_columns)}"
-assert not X_encoded.isna().any().any(), "NaN in Features vorhanden"
-
-print()
-print("Inferenz-Features (erste 10 Spalten):")
-print(X_encoded.iloc[:, :10].to_string(index=False))
-print()
-
-# ────────────────────────────────────────────
-# 7. Prediction
-# ────────────────────────────────────────────
-y_pred_proba = model.predict_proba(X_encoded)[:, 1][0]
-
-if pd.isna(y_pred_proba) or y_pred_proba < 0 or y_pred_proba > 1:
-    raise ValueError(f"Ungueltige Vorhersage: {y_pred_proba}")
-
-y_pred = int(y_pred_proba >= threshold)
-
-# ────────────────────────────────────────────
-# 8. Ergebnis ausgeben
+# 6–8. Pro Location: Encoding, Prediction, Ausgabe
 # ────────────────────────────────────────────
 print("=" * 70)
 print("STARKWIND-VORHERSAGE (3h Horizont, >= 50 km/h)")
+print(f"Inference Time : {datetime.now().isoformat()}")
+print(f"Model Version  : {hw_model.version}")
 print("=" * 70)
-print(f"Location                    : {TARGET_LOCATION}")
-print(f"Starkwind-Wahrscheinlichkeit: {y_pred_proba * 100:.1f}%")
-print(f"Decision Threshold          : {threshold}")
-print()
 
-if y_pred == 1:
-    print("VORHERSAGE: STARKER WIND WAHRSCHEINLICH → Vorsicht!")
-else:
-    print("VORHERSAGE: KEIN STARKER WIND → Alles ruhig")
+for TARGET_LOCATION in LOCATIONS:
+    try:
+        loc_df = all_df[all_df["location"] == TARGET_LOCATION].copy()
 
-print()
-print(f"Feature Timestamp : {latest_ts}")
-print(f"Inference Time    : {datetime.now().isoformat()}")
-print(f"Model Version     : {hw_model.version}")
+        if len(loc_df) == 0:
+            print(f"⚠️  {TARGET_LOCATION}: Keine Daten vorhanden")
+            continue
+
+        features_df = (
+            loc_df
+            .sort_values(TIMESTAMP_COL, ascending=True)
+            .tail(1)
+            .reset_index(drop=True)
+        )
+
+        latest_ts = features_df[TIMESTAMP_COL].iloc[0]
+
+        missing = [c for c in RAW_FEATURE_COLUMNS if c not in features_df.columns]
+        if missing:
+            print(f"⚠️  {TARGET_LOCATION}: Fehlende Spalten {missing}")
+            continue
+
+        X_raw = features_df[RAW_FEATURE_COLUMNS + ["location"]].copy()
+        X_raw["weather_code"] = X_raw["weather_code"].astype(str)
+        X_encoded = pd.get_dummies(X_raw, columns=["weather_code", "location"], dtype=int)
+        X_encoded = X_encoded.reindex(columns=feature_columns, fill_value=0)
+
+        assert X_encoded.shape[1] == len(feature_columns)
+        assert not X_encoded.isna().any().any()
+
+        y_pred_proba = model.predict_proba(X_encoded)[:, 1][0]
+        y_pred = int(y_pred_proba >= threshold)
+
+        warnung = "⚠️  STARKER WIND WAHRSCHEINLICH → Vorsicht!" if y_pred == 1 else "✅ Kein starker Wind"
+
+        print(f"{TARGET_LOCATION:<10} | {y_pred_proba*100:5.1f}% | Threshold: {threshold:.4f} | {warnung}  | TS: {latest_ts}")
+
+    except Exception as e:
+        print(f"❌ {TARGET_LOCATION}: Fehler – {e}")
+
 print("=" * 70)
