@@ -51,13 +51,29 @@ print()
 LOCATIONS = ["zurich", "basel", "bern", "geneva", "lugano"]
 TIMESTAMP_COL = "timestamp"
 
-RAW_FEATURE_COLUMNS = [
-    "temp", "humidity", "dew_point", "cloud_cover",
-    "cloud_cover_low", "pressure", "precip",
-    "wind_gusts", "weather_code",
-    "humidity_avg_24h", "temp_avg_24h", "pressure_avg_24h",
-    "precip_avg_24h", "wind_gusts_avg_24h"
+# Aggregierte Features (Batch/NRT – ueber mehrere Timesteps aggregiert)
+AGGREGATED_FEATURES = [
+    "humidity_avg_24h",      # Durchschnitt Luftfeuchte letzte 24h
+    "temp_avg_24h",          # Durchschnitt Temperatur letzte 24h
+    "pressure_avg_24h",      # Durchschnitt Druck letzte 24h
+    "precip_avg_24h",        # Durchschnitt Niederschlag letzte 24h
+    "wind_gusts_avg_24h"     # Durchschnitt Boeen letzte 24h
 ]
+
+# Aktuelle Features (RT – Real-Time, zum Inferenz-Zeitpunkt bekannt)
+REALTIME_FEATURES = [
+    "temp",                  # aktuelle Temperatur
+    "humidity",              # aktuelle Luftfeuchte
+    "dew_point",             # aktueller Taupunkt
+    "cloud_cover",           # aktuelle Bewoelkung
+    "cloud_cover_low",       # aktuelle niedrige Wolken
+    "pressure",              # aktueller Luftdruck
+    "precip",                # aktueller Niederschlag
+    "wind_gusts",            # aktuelle Boeen
+    "weather_code"           # aktueller Wetterzustand
+]
+
+RAW_FEATURE_COLUMNS = REALTIME_FEATURES + AGGREGATED_FEATURES
 
 # ────────────────────────────────────────────
 # 5. Alle Daten einmal laden
@@ -72,11 +88,14 @@ all_df[TIMESTAMP_COL] = pd.to_datetime(all_df[TIMESTAMP_COL])
 # ────────────────────────────────────────────
 # 6–8. Pro Location: Encoding, Prediction, Ausgabe
 # ────────────────────────────────────────────
-print("=" * 70)
+print("=" * 100)
 print("STARKWIND-VORHERSAGE (3h Horizont, >= 50 km/h)")
 print(f"Inference Time : {datetime.now().isoformat()}")
 print(f"Model Version  : {hw_model.version}")
-print("=" * 70)
+print()
+print(f"Aggregierte Features ({len(AGGREGATED_FEATURES)}): {', '.join(AGGREGATED_FEATURES)}")
+print(f"RT-Features ({len(REALTIME_FEATURES)}): {', '.join(REALTIME_FEATURES)}")
+print("=" * 100)
 
 for TARGET_LOCATION in LOCATIONS:
     try:
@@ -105,8 +124,12 @@ for TARGET_LOCATION in LOCATIONS:
         X_encoded = pd.get_dummies(X_raw, columns=["weather_code", "location"], dtype=int)
         X_encoded = X_encoded.reindex(columns=feature_columns, fill_value=0)
 
-        assert X_encoded.shape[1] == len(feature_columns)
-        assert not X_encoded.isna().any().any()
+        try:
+            assert X_encoded.shape[1] == len(feature_columns)
+            assert not X_encoded.isna().any().any()
+        except AssertionError as e:
+            print(f"❌ {TARGET_LOCATION}: Shape/NaN-Check fehlgeschlagen")
+            continue
 
         y_pred_proba = model.predict_proba(X_encoded)[:, 1][0]
         y_pred = int(y_pred_proba >= threshold)
@@ -118,4 +141,4 @@ for TARGET_LOCATION in LOCATIONS:
     except Exception as e:
         print(f"❌ {TARGET_LOCATION}: Fehler – {e}")
 
-print("=" * 70)
+print("=" * 100)
