@@ -59,22 +59,34 @@ Klassenungleichgewicht, Eval-Metrik AUCPR (robuster bei Imbalance),
 Threshold-Optimierung via F1-Score.
 
 
+## Ausführungsreihenfolge SETUP
+1. Repository klonen
+   git clone https://github.com/maneeee82/MLOPS_Projektarbeit_Stadelmann.git
+   cd MLOPS_Projektarbeit_Stadelmann
 
-## Setup
+2. Python venv erstellen und aktivieren
+   python -m venv .venv
+   
+   # Windows:
+   .venv\Scripts\activate
+   
+   # macOS/Linux:
+   source .venv/bin/activate
+
+3. Dependencies installieren
+   pip install -r requirements.txt
+
+4. .env Datei konfigurieren
+   cp .env.example .env
+   # Dann .env mit Hopsworks API Key eintragen
+
+
+## Ausführungsreihenfolge Pipelines (in dieser Reihenfolge)
 ```bash
-pip install -r requirements.txt
-
-python feature_pipeline.py   # 1. Features berechnen
+python feature_pipeline.py   # 1. Features berechnen und in Featurestore schreiben
 python training_pipeline.py  # 2. Modell trainieren
-python inference_pipeline.py # 3. Inferenz
-```
+python inference_pipeline.py # 3. Inferenz durchführen
 
-`.env` benötigt:
-
-```
-HOPSWORKS_API_KEY=<dein_api_key>
-HOPSWORKS_PROJECT=<dein_projektname>
-```
 
 ---
 
