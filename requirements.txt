@@ -1,8 +1,11 @@
-hopsworks>=3.7,<4.0
+hopsworks[python]==4.7.*
 pandas
+numpy
 scikit-learn
 xgboost
 joblib
 requests
 python-dotenv
-numpy
+openpyxl
+pyarrow
+confluent-kafka

@@ -58,37 +58,47 @@ max. Tiefe 6, Learning Rate 0.05, Subsampling 0.8, `scale_pos_weight` für
 Klassenungleichgewicht, Eval-Metrik AUCPR (robuster bei Imbalance),
 Threshold-Optimierung via F1-Score.
 
+### =============================
+### Ausführungsreihenfolge SETUP
+### =============================
+Getestet mit Python 3.13.12
 
-## Ausführungsreihenfolge SETUP
 1. Repository klonen
+```bash
    git clone https://github.com/maneeee82/MLOPS_Projektarbeit_Stadelmann.git
    cd MLOPS_Projektarbeit_Stadelmann
+```
 
 2. Python venv erstellen und aktivieren
-   python -m venv .venv
-   
-   # Windows:
-   .venv\Scripts\activate
-   
-   # macOS/Linux:
-   source .venv/bin/activate
-
-3. Dependencies installieren
-   pip install -r requirements.txt
-
-4. .env Datei konfigurieren
-   cp .env.example .env
-   # Dann .env mit Hopsworks API Key eintragen
-
-
-## Ausführungsreihenfolge Pipelines (in dieser Reihenfolge)
 ```bash
-python feature_pipeline.py   # 1. Features berechnen und in Featurestore schreiben
-python training_pipeline.py  # 2. Modell trainieren
+   python3 -m venv .venv
+```  
+   Linux:
+```bash
+   source .venv/bin/activate
+```
+3. Dependencies installieren
+```bash
+   pip install -r requirements.txt
+```
+
+4. in Hopsworks einloggen Projekt erstellen und API-Key erstellen (full scope)
+
+5. .env Datei konfigurieren
+```bash
+   cp .env.example .env
+```
+   Dann .env mit Hopsworks API Key eintragen
+
+
+### =============================
+## Ausführungsreihenfolge Pipelines
+### =============================
+```bash
+python feature_pipeline.py   # 1. Features berechnen und in Featurestore schreiben (Dauert ca. 3-4min)
+python training_pipeline.py  # 2. Modell trainieren (Dauert ca. 3-4min)
 python inference_pipeline.py # 3. Inferenz durchführen
-
-
----
+```
 
 ## Limitationen
 - **Kein Scheduler:** Feature Pipeline muss manuell ausgeführt werden
