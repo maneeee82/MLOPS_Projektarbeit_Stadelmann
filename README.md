@@ -1,5 +1,5 @@
 # MLOps Projektarbeit – Wetter Windböen Vorhersage
-# Manuel Stadelmann, 28.04.2026
+# Manuel Stadelmann, 16.05.2026
 
 ## Überblick
 Dieses Projekt implementiert eine FTI-Architektur (Feature-Training-Inference)
@@ -11,9 +11,9 @@ Als Feature Store wird Hopsworks verwendet.
 - 0 = kein starker Wind
 
 ## Datenquelle
-- **API:** [Open-Meteo Archive API](https://archive-api.open-meteo.com/)
+- **API:** [Open-Meteo Archive API](https://archive-api.open-meteo.com/) (die neusten Daten sind ca. 5 Tage alt)
 - **Locations:** Zürich, Basel, Bern, Genf, Lugano
-- **Zeitraum:** stündliche Historiendaten, ca. 1 Jahr Rückblick 
+- **Zeitraum:** stündliche Historiendaten, 1 Jahr Rückblick 
 - **Keine Authentifizierung erforderlich**
 
 
@@ -25,14 +25,14 @@ Als Feature Store wird Hopsworks verwendet.
 
 ## Features (Überblick)
 - **Aggregierte Features (Batch/NRT):** humidity_avg_24h, temp_avg_24h, pressure_avg_24h, precip_avg_24h, wind_gusts_avg_24h
-- **Echtzeitfeatures (RT):** temp, humidity, dew_point, cloud_cover, cloud_cover_low, pressure, precip, wind_gusts, weather_code
+- **Echtzeitfeatures (RT):** temp, humidity, dew_point, cloud_cover, cloud_cover_low, pressure, precip, wind_gusts, weather_code (ACHTUNG: letzter verfügbarer Datensatz auf Featurestore wird als RT Feature verwendet)
 - **Kategorische Features:** location, weather_code (beide One-Hot-Encoded)
 - **Label:** strong_wind_warning (basierend auf Windboeen in t+1h, t+2h, t+3h)
 
 ## Features (Detailliert)
 
 ### Aggregierte Features (Batch/NRT)
-Diese Features werden **ueber mehrere Timesteps** (24h Rolling Window) aggregiert:
+Diese Features werden **über mehrere Timesteps** (24h Rolling Window) aggregiert:
 
 - `humidity_avg_24h` – Durchschnittliche Luftfeuchtigkeit der letzten 24h
 - `temp_avg_24h` – Durchschnittliche Temperatur der letzten 24h
@@ -59,14 +59,14 @@ Diese Features sind **zum Inferenzzeitpunkt verfügbar**:
 - `weather_code` – WMO Wetterkode (kategorisch)
 
 **Charakter:** Diese Features sind **zum Inferenzzeitpunkt bekannt** und werden 
-direkt aus dem Feature Store fuer den aktuellen Datenpunkt geladen. Im Gegensatz 
+direkt aus dem Feature Store für den aktuellen Datenpunkt geladen. Im Gegensatz 
 zu den aggregierten Features hängen sie nicht von der Vergangenheit ab und werden 
 (in einer echten Produktionsumgebung) erst zur Inferenzzeit live aktualisiert. 
-Sie repraesentieren den **Jetzt-Zustand**.
+Sie repräsentieren den **Jetzt-Zustand**.
 
 ### Limitation: Datenquelle
 Die Open-Meteo Archive API liefert nur historische Daten. Um echte Echtzeitdaten 
-zu simulieren, wird bei der Inferenz der **letzte verfuegbare Datenpunkt** aus 
+zu simulieren, wird bei der Inferenz der **letzte verfügbare Datenpunkt** aus 
 dem Feature Store als "aktueller" Datenpunkt verwendet. In einer Produktionsumgebung 
 würde hier die Open-Meteo **Forecast API** verwendet, um echte RT-Daten zu erhalten.
 
@@ -78,15 +78,15 @@ würde hier die Open-Meteo **Forecast API** verwendet, um echte RT-Daten zu erha
 - 24h Rolling-Features berechnen 
 - Label setzen (starker Wind in t+1h, t+2h, t+3h?)
 - In Hopsworks Feature Store schreiben
-- Excel fuer Datenkontrolle generieren
+- Excel für Datenkontrolle generieren
 
 ### **`training_pipeline.py`**
 - Daten aus Feature Store laden
-- Feature Engineering: One-Hot-Encoding fuer weather_code, location
-- XGBoost Classifier trainieren (80/20 zufaelliger Split)
+- Feature Engineering: One-Hot-Encoding für weather_code, location
+- XGBoost Classifier trainieren (80/20 zufälliger Split)
 - Threshold via F1-Score optimieren
 - Modell + Threshold in Hopsworks Model Registry speichern
-  (registriert mit `metric=f1` fuer spätere Versionsselektion)
+  (registriert mit `metric=f1` für spätere Versionsselektion)
 
 ### **`inference_pipeline.py`**
 - Beste Modellversion aus Registry laden (`metric=f1, direction=max`)
@@ -105,7 +105,7 @@ Mehrere Entscheidungsbäume werden nacheinander trainiert, wobei jeder Baum die 
 - Max. Tiefe 6
 - Learning Rate 0.05
 - Subsampling 0.8
-- `scale_pos_weight` fuer Klassenungleichgewicht
+- `scale_pos_weight` für Klassenungleichgewicht
 - Eval-Metrik AUCPR (robuster bei Imbalance)
 - Threshold-Optimierung via F1-Score
 
@@ -152,15 +152,14 @@ python inference_pipeline.py # 3. Inferenz durchführen
 ## Limitationen
 
 - **Kein Scheduler:** Feature Pipeline muss manuell ausgeführt werden. 
-  In der Praxis würde ein Scheduler (z.B. Apache Airflow, cron) regelmäßig neue Daten einspeisen.
+  In der Praxis würde ein Scheduler (z.B. Apache Airflow, cron) regelmässig neue Daten einspeisen.
 
 - **Klassenungleichgewicht:** Adressiert via `scale_pos_weight` + Threshold-Optimierung, 
   nicht vollständig gelöst. Ein Oversampling oder dedizierte Strategie könnte hier helfen.
 
-- **Kein zeitlicher Train/Test-Split:** Split ist zufällig, nicht chronologisch. 
-  Dies führt zu Data Leakage (das Modell "sieht" zufällig auch zukünftige Daten im Training). 
-  In der Praxis sollte der Split **zeitbasiert** sein: z.B. Trainingsdaten = erste 80%, 
-  Testdaten = letzte 20%.
+- **Kein zeitlicher Train/Test-Split:** Der Train/Test-Split erfolgt zufällig statt zeitbasiert, 
+  was bei Zeitreihendaten zu Data Leakage führen kann. Für ein produktives Modell wäre ein 
+  chronologischer Split korrekt.
 
 - **Keine echten RT-Daten:** Die Open-Meteo Archive API liefert nur historische Daten. 
   Bei der Inferenz wird der **letzte verfügbare Datenpunkt** als "aktueller" Punkt verwendet. 
